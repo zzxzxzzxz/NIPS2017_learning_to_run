@@ -440,7 +440,7 @@ def test(args):
 
     ddpg = DDPG(dim_state, dim_action)
     ddpg.load_model(args.model, load_memory=False)
-    env = RunEnv(visualize=args.visualize, max_obstacle=10)
+    env = RunEnv(visualize=args.visualize, max_obstacles=10)
 
     np.random.seed(11232)
     for i in range(1):
