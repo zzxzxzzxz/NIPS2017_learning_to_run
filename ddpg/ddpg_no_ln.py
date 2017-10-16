@@ -40,20 +40,6 @@ BATCH_SIZE = 64
 TOKEN = '0f3e16541bd585c72ccb1ad840807d7f'
 
 
-class LayerNorm(nn.Module):
-
-    def __init__(self, features, eps=1e-6):
-        super().__init__()
-        self.gamma = nn.Parameter(torch.ones(features))
-        self.beta = nn.Parameter(torch.zeros(features))
-        self.eps = eps
-
-    def forward(self, x):
-        mean = x.mean(-1, keepdim=True)
-        std = x.std(-1, keepdim=True)
-        return self.gamma * (x - mean) / (std + self.eps) + self.beta
-
-
 class Actor(nn.Module):
     def __init__(self, dim_state, dim_action):
         super(Actor, self).__init__()
@@ -62,20 +48,12 @@ class Actor(nn.Module):
         self.hidden3 = nn.Linear(128, 128)
         self.hidden4 = nn.Linear(128, 128)
         self.hidden5 = nn.Linear(128, dim_action)
-        self.ln1 = LayerNorm(256)
-        self.ln2 = LayerNorm(128)
-        self.ln3 = LayerNorm(128)
-        self.ln4 = LayerNorm(128)
 
     def forward(self, x):
         x = F.leaky_relu(self.hidden1(x), negative_slope=0.2)
-        x = self.ln1(x)
         x = F.leaky_relu(self.hidden2(x), negative_slope=0.2)
-        x = self.ln2(x)
         x = F.leaky_relu(self.hidden3(x), negative_slope=0.2)
-        x = self.ln3(x)
         x = F.leaky_relu(self.hidden4(x), negative_slope=0.2)
-        x = self.ln4(x)
         x = F.tanh(self.hidden5(x)) * 0.5 + 0.5
         return x
 
@@ -98,25 +76,15 @@ class Critic(nn.Module):
         self.hidden4 = nn.Linear(128, 128)
         self.hidden5 = nn.Linear(128, 48)
         self.hidden6 = nn.Linear(48, 1)
-        self.ln1 = LayerNorm(256)
-        self.ln2 = LayerNorm(128)
-        self.ln3 = LayerNorm(128)
-        self.ln4 = LayerNorm(128)
-        self.ln5 = LayerNorm(48)
 
     def forward(self, x):
         obs, act = x
         x = F.leaky_relu(self.hidden1(obs), negative_slope=0.2)
-        x = self.ln1(x)
         x = F.leaky_relu(self.hidden2(x), negative_slope=0.2)
-        x = self.ln2(x)
         x = torch.cat([x, act], 1)
         x = F.leaky_relu(self.hidden3(x), negative_slope=0.2)
-        x = self.ln3(x)
         x = F.leaky_relu(self.hidden4(x), negative_slope=0.2)
-        x = self.ln4(x)
         x = F.leaky_relu(self.hidden5(x), negative_slope=0.2)
-        x = self.ln5(x)
         x = self.hidden6(x)
         return x
 
@@ -404,6 +372,31 @@ def train(args):
             ddpg.save_model('{}/{}'.format(args.model, i + 1))
 
 
+def testonce(i, ddpg):
+    env = RunEnv(visualize=True)
+
+    np.random.seed(222)
+    step = 0
+    state = env.reset(difficulty=2)
+    old_state = None
+    ep_reward = 0
+    while True:
+        state, old_state = go(state, old_state, step=step)
+
+        action = ddpg.select_action(list(state))
+        next_state, reward, done, info = env.step(action.tolist())
+
+        state = next_state
+        ep_reward += reward
+        step += 1
+
+        if done:
+            break
+
+    print('\nEpisode: {} Reward: {}, n_steps: {}'.format(i, ep_reward, step))
+    del env
+
+
 def retrain(args):
     print('start retraining')
     from observation_processor import processed_dims
@@ -440,7 +433,7 @@ def test(args):
 
     ddpg = DDPG(dim_state, dim_action)
     ddpg.load_model(args.model, load_memory=False)
-    env = RunEnv(visualize=args.visualize, max_obstacle=10)
+    env = RunEnv(visualize=args.visualize)
 
     np.random.seed(11232)
     for i in range(1):
