@@ -246,11 +246,11 @@ def generate_observation(new, old=None, step=None):
                 current_ball_height,
                 current_ball_radius,
             ])
-            if len(balls)>3:
-                print(balls)
-                print('(@ step '+str(step)+')What the fuck you just did! Why num of balls became greater than 3!!!')
-                q.dump(reason='ballgt3')
-                raise Exception('ball number greater than 3.')
+#            if len(balls)>3:
+#                print(balls)
+#                print('(@ step '+str(step)+')What the fuck you just did! Why num of balls became greater than 3!!!')
+#                q.dump(reason='ballgt3')
+#                raise Exception('ball number greater than 3.')
         else:
             pass # we already met this ball before.
 

@@ -18,10 +18,8 @@ from torch.autograd import Variable
 from osim.http.client import Client
 
 from noise import one_fsq_noise
-#from multi import fastenv
-#from observation_processor import generate_observation as go
-from feature_generator2 import FeatureGenerator
-from wrap_env import fastenv
+from multi import fastenv
+from observation_processor import generate_observation as go
 from plotter import interprocess_plotter as Plotter
 
 np.random.seed(314)
@@ -150,10 +148,13 @@ def to_numpy(var):
 
 
 def mirror_state(state):
-    pass
+    for i in [6, 8, 10]:
+        state[i], state[i+1] = state[i+1], state[i]
 
 def mirror_action(action):
-    return action[9:] + action[:9]
+    for i in range(9):
+        action[i], action[i+9] = action[i+9], action[i]
+    return action
 
 def deepcopy_all(*args):
     return list(map(deepcopy, args))
@@ -167,10 +168,11 @@ class ReplayMemory(object):
         self.lock = Lock()
 
     def push(self, data):
-        if len(self.memory) < self.capacity:
-            self.memory.append(None)
-        self.memory[self.position] = data
-        self.position = (self.position + 1) % self.capacity
+        with self.lock:
+            if len(self.memory) < self.capacity:
+                self.memory.append(None)
+            self.memory[self.position] = data
+            self.position = (self.position + 1) % self.capacity
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
@@ -179,8 +181,9 @@ class ReplayMemory(object):
         return len(self.memory)
 
     def save(self, path):
-        with open(path, 'wb') as f:
-            pickle.dump([self.memory ,self.position], f)
+        with self.lock:
+            with open(path, 'wb') as f:
+                pickle.dump([self.memory ,self.position], f)
         print('memory dumped into', path)
 
     def load(self, path):
@@ -305,8 +308,6 @@ class DistributedTrain(object):
 
 
     def playonce(self, noise_level, _env):
-        #noise_start = np.random.randint(20, 450)
-        noise_start = 0
         t = time.time()
 
         skip = ENV_SKIP
@@ -325,7 +326,6 @@ class DistributedTrain(object):
 
         while True:
             action = self.agent.select_action(state)
-            #if n_steps <= 20 or n_steps >= noise_start:
             exploration_noise = noise_source.one((self.agent.dim_action,), noise_level)
             action += exploration_noise * 0.5
             action = np.clip(action, 0, 1)
@@ -344,18 +344,14 @@ class DistributedTrain(object):
             if done:
                 break
 
-        with self.lock:
-            for ep_m in ep_memories:
+        for ep_m in ep_memories:
+            if np.random.uniform() > 0.5:
                 self.agent.memory.push(ep_m)
-                state, action, [reward], next_state, [done] = ep_m
-                state = np.concatenate([state[:43], state[76:109], state[43:76]])
-                next_state = np.concatenate([next_state[:43], next_state[76:109], next_state[43:76]])
-                action = np.concatenate([action[9:], action[:9]])
-                self.agent.memory.push([state, action, [reward], next_state, [done]])
 
-            t = time.time() - t
-            print('reward: {}, n_steps: {}, explore: ({}, {:.5f}), n_mem: {}, time: {:.2f}' \
-                  .format(ep_reward, n_steps, noise_start, noise_level, len(self.agent.memory), t))
+        t = time.time() - t
+        with self.lock:
+            print('reward: {}, n_steps: {}, explore: {:.5f}, n_mem: {}, time: {:.2f}' \
+                  .format(ep_reward, n_steps, noise_level, len(self.agent.memory), t))
             global t0
             self.plotter.pushys([ep_reward, noise_level, (time.time() - t0) % 3600 / 3600 - 2])
 
@@ -370,32 +366,29 @@ class DistributedTrain(object):
                 t.start()
                 break
             else:
-                time.sleep(0.005)
+                time.sleep(0.01)
 
 
 def train(args):
     print('start training')
     global t0
     t0 = time.time()
+#    from observation_processor import processed_dims
+#    dim_state = processed_dims
 
-    dim_state = FeatureGenerator.dim_feature
+    dim_state = 112
     dim_action = 18
     print(dim_state, dim_action)
 
     ddpg = DDPG(dim_state, dim_action)
-
-    if args.resume > 0:
-        print('load model {}/{}'.format(args.model, args.resume))
-        ddpg.load_model('{}/{}'.format(args.model, args.resume))
-
     dist_train = DistributedTrain(ddpg)
 
+    noise_level = 2.0
     noise_decay_rate = 0.001
     noise_floor = 0.05
     noiseless = 0.01
-    noise_level = 2.0 * ((1.0 - noise_decay_rate) ** args.resume)
 
-    for i in range(args.resume, args.max_ep):
+    for i in range(args.max_ep):
         print('Episode {} / {}'.format(i + 1, args.max_ep))
 
         noise_level *= (1.0 - noise_decay_rate)
@@ -406,7 +399,7 @@ def train(args):
 
         print('elapsed time: {0:.2f} secs'.format(time.time() - t0))
         sys.stdout.flush()
-        time.sleep(0.003)
+        time.sleep(0.01)
 
         if args.model and (i + 1) % 100 == 0:
             ddpg.save_model('{}/{}'.format(args.model, i + 1))
@@ -414,78 +407,73 @@ def train(args):
 
 def retrain(args):
     print('start retraining')
-    #from observation_processor import processed_dims
+    from observation_processor import processed_dims
 
-    dim_state = FeatureGenerator.dim_feature
+    dim_state = processed_dims
     dim_action = 18
     print(dim_state, dim_action)
 
     ddpg = DDPG(dim_state, dim_action)
-    ddpg.batchsize = BATCH_SIZE
+    ddpg.batchsize = BATCH_SIZE * 16
 
     t0 = time.time()
-    with open('models/test_GPU_demo/rpm.pkl', 'rb') as f:
+    with open('try_reproduce3/rpm.pkl', 'rb') as f:
         ms, pos = pickle.load(f)
     for i, m in enumerate(ms):
         ddpg.memory.push(m)
+        if (i+1) % 1000 == 0:
+            print(i+1, time.time() - t0)
+        if (i+1) % 10000 == 0:
+            ddpg.save_model('retrain_iters3/{}'.format(i+1))
+        if i > 64 * 128:
+            ddpg.learn()
 
-    for i in range(10000):
-        if (i + 1) % 1000 == 0:
-            print(i + 1)
-        ddpg.learn()
-
-    ddpg.save_model('models/retrain_test_GPU_demo')
+    ddpg.save_model('retrain_iters/{}'.format(i+1))
 
 
 def test(args):
     print('start testing')
     #from observation_processor import processed_dims
 
-    dim_state = FeatureGenerator.dim_feature
+    #dim_state = processed_dims
+    dim_state = 112
     dim_action = 18
     print(dim_state, dim_action)
 
     ddpg = DDPG(dim_state, dim_action)
     ddpg.load_model(args.model, load_memory=False)
-    env = RunEnv(visualize=args.visualize, max_obstacles=0)
+    env = RunEnv(visualize=args.visualize, max_obstacles=3)
 
-    np.random.seed(111123)
+    np.random.seed(123123)
     for i in range(1):
         step = 0
-        state = env.reset(difficulty=0)
-        fg = FeatureGenerator()
-
-        state = fg.gen(state)
+        state = env.reset(difficulty=2)
         old_state = None
         ep_reward = 0
-        ep_memories = []
+        iM, M = -1, 0
         while True:
-            #_state, old_state = go(state, old_state, step=step)
+            state, old_state = go(state, old_state, step=step)
+            for i in range(len(state)):
+                if abs(state[i]) > M:
+                    M = state[i]
+                    iM = i
+            #print(sum(abs(a - b) for a, b in zip(f, state)) < 1e-8)
 
             action = ddpg.select_action(list(state))
             next_state, reward, done, info = env.step(action.tolist())
-            next_state = fg.gen(next_state)
-
-            #ep_memories.append(deepcopy_all(state, action, [reward], next_state, [done]))
 
             print('step: {0:03d}'.format(step), end=', action: ')
             for act in action:
                 print('{0:.3f}'.format(act), end=', ')
             print()
-
+            print(iM, M)
             state = next_state
             ep_reward += reward
             step += 1
 
             if done:
                 break
-
-        #for ep_m in ep_memories:
-        #    self.agent.memory.push(ep_m)
-
         print('\nEpisode: {} Reward: {}, n_steps: {}'.format(i, ep_reward, step))
-
-    #ddpg.save_model('models/test_GPU_demo')
 
 
 def submit(args):
@@ -536,9 +524,8 @@ def submit(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='model', type=str)
-    parser.add_argument('--max_ep', default=10000, type=int)
+    parser.add_argument('--max_ep', default=7000, type=int)
     parser.add_argument('--visualize', action='store_true')
-    parser.add_argument('--resume', default=0, type=int)
 
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--train', action='store_true')

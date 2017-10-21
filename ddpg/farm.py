@@ -6,9 +6,10 @@
 
 import multiprocessing,time,random,threading
 from multiprocessing import Process, Pipe, Queue
-from osim.env import RunEnv
-#from myenv import MyRunEnv as RunEnv
+#from osim.env import RunEnv
+from myenv import MyRunEnv as RunEnv
 import traceback
+import numpy as np
 
 ncpu = multiprocessing.cpu_count()
 
@@ -26,7 +27,8 @@ def standalone_headless_isolated(pq, cq, plock):
     plock.acquire()
     print('starting headless...',pq,cq)
     try:
-        e = RunEnv(visualize=False)
+        e = RunEnv(visualize=False, max_obstacles=3)
+
         #bind_alternative_pelvis_judgement(e)
     except Exception as e:
         print('error on start of standalone')
