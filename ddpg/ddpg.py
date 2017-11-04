@@ -18,11 +18,8 @@ from torch.autograd import Variable
 from osim.http.client import Client
 
 from noise import one_fsq_noise
-#from multi import fastenv
-#from observation_processor import generate_observation as go
-from feature_generator2 import FeatureGenerator
+from feature_generator import FeatureGenerator
 from wrap_env import fastenv
-#from plotter import interprocess_plotter as Plotter
 
 np.random.seed(314)
 torch.manual_seed(314)
@@ -31,7 +28,7 @@ torch.manual_seed(314)
 
 USE_CUDA = False
 FLOAT = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
-MAX_EP_STEPS = 1000
+MAX_EP_STEPS = 560
 ENV_SKIP = 4
 LR_ACTOR = 1e-4     # learning rate for actor
 LR_CRITIC = 3e-4    # learning rate for critic
@@ -43,7 +40,7 @@ TOKEN = '0f3e16541bd585c72ccb1ad840807d7f'
 
 DIM_ACTION = 18
 DIM_BODY = 70
-DIM_EX = 25
+DIM_EX = 250
 OFFSET_BODY = DIM_BODY
 OFFSET_EX = OFFSET_BODY + DIM_EX
 
@@ -319,7 +316,6 @@ class DistributedTrain(object):
     def __init__(self, agent):
         self.agent = agent
         self.lock = Lock()
-        #self.plotter = Plotter(num_lines=3)
 
         from farmer import farmer as farmer_class
         self.farmer = farmer_class()
@@ -356,10 +352,11 @@ class DistributedTrain(object):
             action = np.clip(action, 0, 1)
 
             next_state, reward, done, info = env.step(action.tolist())
-            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done]))
+            done1 = False if info['step'] == MAX_EP_STEPS else done
+            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done1]))
             if n_steps >= 25:
                 self.agent.memory.push(deepcopy_all(mirror_s(state), mirror_a(action), [reward],
-                                                    mirror_s(next_state), [done]))
+                                                    mirror_s(next_state), [done1]))
 
             if len(self.agent.memory) >= warmup:
                 with self.lock:
@@ -376,9 +373,6 @@ class DistributedTrain(object):
             t = time.time() - t
             print('reward: {}, n_steps: {}, explore: {:.5f}, n_mem: {}, time: {:.2f}' \
                   .format(ep_reward, n_steps, noise_level, len(self.agent.memory), t))
-
-            #global t0
-            #self.plotter.pushys([max(-4.0, ep_reward), noise_level, (time.time() - t0) % 3600 / 3600 - 3])
 
         _env.rel()
         del env
@@ -408,9 +402,9 @@ def train(args):
     dist_train = DistributedTrain(ddpg)
 
     noise_decay_rate = 0.001
-    noise_floor = 0.1
-    noiseless = 0.01
-    noise_level = 1.0 * ((1.0 - noise_decay_rate) ** args.resume)
+    noise_floor = 0.001
+    noiseless = 0.001
+    noise_level = 1.2 * ((1.0 - noise_decay_rate) ** args.resume)
 
     for i in range(args.resume, args.max_ep):
         print('Episode {} / {}'.format(i + 1, args.max_ep))
@@ -418,7 +412,7 @@ def train(args):
         noise_level *= (1.0 - noise_decay_rate)
         noise_level = max(noise_floor, noise_level)
 
-        nl = noise_level if (i + 1) % 20 else noiseless
+        nl = noise_level if (i + 1) % 40 else noiseless
         dist_train.play_if_available(nl)
 
         print('elapsed time: {0:.2f} secs'.format(time.time() - t0))

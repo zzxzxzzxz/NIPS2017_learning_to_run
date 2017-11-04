@@ -1,1 +1,1 @@
-farmlist_base = [('127.0.0.1', 8)]
+farmlist_base = [('127.0.0.1', 30)]

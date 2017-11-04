@@ -3,7 +3,7 @@
 
 # a farm should consist of a pool of instances
 # and expose those instances as one giant callable class
-
+import numpy as np
 import multiprocessing,time,random,threading
 from multiprocessing import Process, Pipe, Queue
 # from osim.env import RunEnv
@@ -19,7 +19,7 @@ def bind_alternative_pelvis_judgement(runenv):
 
 # use custom episode length.
 def use_alternative_episode_length(runenv):
-    runenv.spec.timestep_limit = 600
+    runenv.spec.timestep_limit = 560
 
 # separate process that holds a separate RunEnv instance.
 # This has to be done since RunEnv() in the same process result in interleaved running of simulations.
@@ -31,9 +31,12 @@ def standalone_headless_isolated(pq, cq, plock):
         import traceback
         #from osim.env import RunEnv
         from myenv import MyRunEnv as RunEnv
-        e = RunEnv(visualize=False, max_obstacles=3)
-        #bind_alternative_pelvis_judgement(e)
-        #use_alternative_episode_length(e)
+        if np.random.uniform() <= 0.05:
+            max_obstacles = 0
+        else:
+            max_obstacles = 5
+        e = RunEnv(visualize=False, max_obstacles=max_obstacles)
+        use_alternative_episode_length(e)
     except Exception as e:
         print('error on start of standalone')
         traceback.print_exc()

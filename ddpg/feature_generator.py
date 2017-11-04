@@ -1,5 +1,6 @@
 from collections import namedtuple
 import numpy as np
+import itertools
 
 
 class Ball(object):
@@ -13,8 +14,8 @@ class Ball(object):
         if sample_x >= self.x + self.radius - eps or sample_x <= self.x - self.radius + eps:
             return 0.0
 
-        h = (self.radius ** 2 - (sample_x - self.x) ** 2) ** 0.5
-        return max(0.0, h + self.y)
+        h = (self.radius ** 2 - abs(sample_x - self.x) ** 2) ** 0.5
+        return max(0.0, h + self.y + 0.1)
 
 
 class Observation(object):
@@ -93,12 +94,12 @@ class FeatureGenerator(object):
         self.traj = None
 
     def draw_balls(self, x):
-        l = -10
-        r = 15
+        l = -100
+        r = 150
         heights = [0.0 for i in range(l, r)]
         for i in range(l, r):
             for ball in self.balls.values():
-                heights[i-l] = max(heights[i-l], ball.height(x + i / 20))
+                heights[i-l] = max(heights[i-l], ball.height(x + i / 100))
         return heights
 
     def gen(self, state):
@@ -119,9 +120,9 @@ class FeatureGenerator(object):
         extero = []
 
         central, left, right = [], [], []
-        central.append(obs.pelvis_r / 2)
+        central.append(obs.pelvis_r / 4)
         central.append(obs.pelvis_y - 0.5)
-        central.append(obs.pelvis_vr / 2)
+        central.append(obs.pelvis_vr / 4)
         central.append(obs.pelvis_vx / 10)
         central.append(obs.pelvis_vy / 10)
 
@@ -225,20 +226,18 @@ class FeatureGenerator(object):
         left += [v * 10 for v in left_rvel]
         right += [v * 10 for v in right_rvel]
 
-        left += [np.clip(-0.027 - obs.left_toe_y, 0, 0.05) * 20]
-        left += [np.clip(0.023 - obs.left_talus_y, 0, 0.05) * 20]
+        left += [np.clip(0.0 - obs.left_toe_y, 0.0, 0.05) * 20]
+        left += [np.clip(0.05 - obs.left_talus_y, 0.0, 0.05) * 20]
 
-        right += [np.clip(-0.027 - obs.right_toe_y, 0, 0.05) * 20]
-        right += [np.clip(0.023 - obs.right_talus_y, 0, 0.05) * 20]
+        right += [np.clip(0.0 - obs.right_toe_y, 0.0, 0.05) * 20]
+        right += [np.clip(0.05 - obs.right_talus_y, 0.0, 0.05) * 20]
 
         extero = self.draw_balls(obs.pelvis_x)
 
-        start = [1.0 if self.step < 150 else 0.0, 0.0]
         self.step += 1
 
-        #print(len(central) + len(left) + len(right), len(extero), len(start))
-        #print(len(central), len(left), len(right), len(extero), len(start))
-        return central + left + right + extero + start
+        #print(len(central), len(left), len(right), len(extero))
+        return central + left + right + extero
 
 
 if __name__ == '__main__':
