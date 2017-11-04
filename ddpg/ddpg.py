@@ -22,14 +22,14 @@ from noise import one_fsq_noise
 #from observation_processor import generate_observation as go
 from feature_generator2 import FeatureGenerator
 from wrap_env import fastenv
-from plotter import interprocess_plotter as Plotter
+#from plotter import interprocess_plotter as Plotter
 
 np.random.seed(314)
 torch.manual_seed(314)
 
 #####################  hyper parameters  ####################
 
-USE_CUDA = True
+USE_CUDA = False
 FLOAT = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
 MAX_EP_STEPS = 1000
 ENV_SKIP = 4
@@ -38,7 +38,7 @@ LR_CRITIC = 3e-4    # learning rate for critic
 GAMMA = 0.98        # reward discount
 TAU = 1e-3
 MEMORY_CAPACITY = 1000000
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 TOKEN = '0f3e16541bd585c72ccb1ad840807d7f'
 
 DIM_ACTION = 18
@@ -281,7 +281,7 @@ class DDPG(object):
 
 
     def save_model(self, path, niters, save_memory=True):
-        os.makedirs(path, exist_ok=True)
+        os.makedirs('{}/{}'.format(path, niters), exist_ok=True)
         torch.save(
             self.actor.state_dict(),
             '{}/{}/actor.pkl'.format(path, niters)
@@ -319,7 +319,7 @@ class DistributedTrain(object):
     def __init__(self, agent):
         self.agent = agent
         self.lock = Lock()
-        self.plotter = Plotter(num_lines=3)
+        #self.plotter = Plotter(num_lines=3)
 
         from farmer import farmer as farmer_class
         self.farmer = farmer_class()
@@ -377,8 +377,8 @@ class DistributedTrain(object):
             print('reward: {}, n_steps: {}, explore: {:.5f}, n_mem: {}, time: {:.2f}' \
                   .format(ep_reward, n_steps, noise_level, len(self.agent.memory), t))
 
-            global t0
-            self.plotter.pushys([max(-4.0, ep_reward), noise_level, (time.time() - t0) % 3600 / 3600 - 3])
+            #global t0
+            #self.plotter.pushys([max(-4.0, ep_reward), noise_level, (time.time() - t0) % 3600 / 3600 - 3])
 
         _env.rel()
         del env
