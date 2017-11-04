@@ -37,22 +37,23 @@ LR_ACTOR = 1e-4     # learning rate for actor
 LR_CRITIC = 3e-4    # learning rate for critic
 GAMMA = 0.98        # reward discount
 TAU = 1e-3
-MEMORY_CAPACITY = 1000000
+MEMORY_CAPACITY = 500000
 BATCH_SIZE = 64
 TOKEN = '0f3e16541bd585c72ccb1ad840807d7f'
-
-DIM_ACTION = 18
-DIM_BODY = 70
-DIM_EX = 25
-OFFSET_BODY = DIM_BODY
-OFFSET_EX = OFFSET_BODY + DIM_EX
 
 DIM_CENT = 20
 DIM_LEFT = 25
 DIM_RIGHT = 25
+DIM_EX = 25
+DIM_START = 1
+DIM_ZERO = 1
+DIM_ACTION = 9
 OFFSET_CENT = DIM_CENT
 OFFSET_LEFT = OFFSET_CENT + DIM_LEFT
 OFFSET_RIGHT = OFFSET_LEFT + DIM_RIGHT
+OFFSET_EX = OFFSET_RIGHT + DIM_EX
+OFFSET_START = OFFSET_EX + DIM_START
+DIM_ALL = OFFSET_START + DIM_ZERO
 
 
 class LayerNorm(nn.Module):
@@ -72,53 +73,92 @@ class LayerNorm(nn.Module):
 class Actor(nn.Module):
     def __init__(self):
         super(Actor, self).__init__()
-        self.extero1 = nn.Linear(DIM_EX, 128)
-        self.extero2 = nn.Linear(128, 128)
+        self.extero1 = nn.Linear(DIM_EX, 64)
+        self.extero2 = nn.Linear(64, 64)
+        self.hidden1 = nn.Linear(DIM_CENT + DIM_LEFT + DIM_RIGHT, 256)
+        self.hidden2 = nn.Linear(256, 128)
 
-        self.ln_e1 = LayerNorm(128)
-        self.ln_e2 = LayerNorm(128)
-
-        self.hidden1 = nn.Linear(DIM_BODY, 256)
-        self.hidden2 = nn.Linear(256 + 128, 128)
-        self.hidden3 = nn.Linear(128, 128)
+        self.start = nn.Linear(1, 64)
+        self.hidden3 = nn.Linear(128 + 64 + 64, 128)
         self.hidden4 = nn.Linear(128, 128)
         self.hidden5 = nn.Linear(128, DIM_ACTION)
 
-        self.ln1 = LayerNorm(256)
-        self.ln2 = LayerNorm(128)
-        self.ln3 = LayerNorm(128)
-        self.ln4 = LayerNorm(128)
+        self.ln_e1 = LayerNorm(64)
+        self.ln_e2 = LayerNorm(64)
+
+        self.ln_h1 = LayerNorm(256)
+        self.ln_h2 = LayerNorm(128)
+        self.ln_h3 = LayerNorm(128)
+        self.ln_h4 = LayerNorm(128)
 
     def forward(self, x):
-        x1 = x[:, :OFFSET_BODY]
-        x2 = x[:, OFFSET_BODY:OFFSET_EX]
+        cent = x[:, :OFFSET_CENT]
+        left = x[:, OFFSET_CENT:OFFSET_LEFT]
+        right = x[:, OFFSET_LEFT:OFFSET_RIGHT]
+        extero = x[:, OFFSET_RIGHT:OFFSET_EX]
+        start = x[:, OFFSET_EX:OFFSET_START]
+        zero = x[:, OFFSET_START:]
+
+
+        start = self.start(start)
+        zero = self.start(zero)
+
+        x1 = torch.cat([cent, left, right], 1)
+        x2 = torch.cat([cent, right, left], 1)
+        x3 = extero
 
         x1 = F.leaky_relu(self.hidden1(x1), negative_slope=0.2)
-        x1 = self.ln1(x1)
+        x1 = self.ln_h1(x1)
+        x1 = F.leaky_relu(self.hidden2(x1), negative_slope=0.2)
+        x1 = self.ln_h2(x1)
 
-        x2 = F.leaky_relu(self.extero1(x2), negative_slope=0.2)
-        x2 = self.ln_e1(x2)
-        x2 = F.leaky_relu(self.extero2(x2), negative_slope=0.2)
-        x2 = self.ln_e2(x2)
+        x2 = F.leaky_relu(self.hidden1(x2), negative_slope=0.2)
+        x2 = self.ln_h1(x2)
+        x2 = F.leaky_relu(self.hidden2(x2), negative_slope=0.2)
+        x2 = self.ln_h2(x2)
 
-        x = torch.cat([x1, x2], 1)
-        x = F.leaky_relu(self.hidden2(x), negative_slope=0.2)
-        x = self.ln2(x)
-        x = F.leaky_relu(self.hidden3(x), negative_slope=0.2)
-        x = self.ln3(x)
-        x = F.leaky_relu(self.hidden4(x), negative_slope=0.2)
-        x = self.ln4(x)
-        x = F.tanh(self.hidden5(x)) * 0.5 + 0.5
+        x3 = F.leaky_relu(self.extero1(x3), negative_slope=0.2)
+        x3 = self.ln_e1(x3)
+        x3 = F.leaky_relu(self.extero2(x3), negative_slope=0.2)
+        x3 = self.ln_e2(x3)
+
+        x4 = torch.cat([x1, x3, start], 1)
+        x5 = torch.cat([x2, x3, zero], 1)
+
+        x4 = F.leaky_relu(self.hidden3(x4), negative_slope=0.2)
+        x4 = self.ln_h3(x4)
+        x4 = F.leaky_relu(self.hidden4(x4), negative_slope=0.2)
+        x4 = self.ln_h4(x4)
+        x4 = F.tanh(self.hidden5(x4)) * 0.5 + 0.5
+
+        x5 = F.leaky_relu(self.hidden3(x5), negative_slope=0.2)
+        x5 = self.ln_h3(x5)
+        x5 = F.leaky_relu(self.hidden4(x5), negative_slope=0.2)
+        x5 = self.ln_h4(x5)
+        x5 = F.tanh(self.hidden5(x5)) * 0.5 + 0.5
+
+        x = torch.cat([x4, x5], 1)
         return x
+
+    def init_weights(self):
+        super(Actor, self).init_weights()
+        self.start.weight.data.normal_(0.0, 1.0)
+        self.extero1.weight.data.normal_(0.0, 1.66667)
+        self.extero2.weight.data.normal_(0.0, 1.66667)
+        self.hidden1.weight.data.normal_(0.0, 1.66667)
+        self.hidden2.weight.data.normal_(0.0, 1.66667)
+        self.hidden3.weight.data.normal_(0.0, 1.66667)
+        self.hidden4.weight.data.normal_(0.0, 1.66667)
+        self.hidden5.weight.data.normal_(0.0, 1.0)
 
 
 class Critic(nn.Module):
 
     def __init__(self):
         super(Critic, self).__init__()
-        self.hidden1 = nn.Linear(DIM_BODY + DIM_EX, 256)
-        self.hidden2 = nn.Linear(256 + DIM_ACTION, 128)
-        self.hidden3 = nn.Linear(128, 128)
+        self.hidden1 = nn.Linear(DIM_ALL, 256)
+        self.hidden2 = nn.Linear(256, 128)
+        self.hidden3 = nn.Linear(128 + DIM_ACTION * 2, 128)
         self.hidden4 = nn.Linear(128, 128)
         self.hidden5 = nn.Linear(128, 1)
         self.ln1 = LayerNorm(256)
@@ -128,19 +168,25 @@ class Critic(nn.Module):
 
     def forward(self, x):
         obs, act = x
-        obs = obs[:, :OFFSET_EX]
-
         x = F.leaky_relu(self.hidden1(obs), negative_slope=0.2)
         x = self.ln1(x)
-        x = torch.cat([x, act], 1)
         x = F.leaky_relu(self.hidden2(x), negative_slope=0.2)
         x = self.ln2(x)
+        x = torch.cat([x, act], 1)
         x = F.leaky_relu(self.hidden3(x), negative_slope=0.2)
         x = self.ln3(x)
         x = F.leaky_relu(self.hidden4(x), negative_slope=0.2)
         x = self.ln4(x)
         x = self.hidden5(x)
         return x
+
+    def init_weights(self):
+        super(Critic, self).init_weights()
+        self.hidden1.weight.data.normal_(0.0, 1.66667)
+        self.hidden2.weight.data.normal_(0.0, 1.66667)
+        self.hidden3.weight.data.normal_(0.0, 1.66667)
+        self.hidden4.weight.data.normal_(0.0, 1.66667)
+        self.hidden5.weight.data.normal_(0.0, 1.0)
 
 
 def sync_target(target, source, tau):
@@ -273,45 +319,28 @@ class DDPG(object):
             torch.load('{}/critic_target.pkl'.format(path))
         )
         if load_memory:
-            try:
-                self.memory.load('{}/rpm.pkl'.format(path))
-            except IOError:
-                path = os.path.dirname(path)
-                self.memory.load('{}/rpm.pkl'.format(path))
+            self.memory.load('{}/rpm.pkl'.format(path))
 
-
-    def save_model(self, path, niters, save_memory=True):
+    def save_model(self, path, save_memory=True):
         os.makedirs(path, exist_ok=True)
         torch.save(
             self.actor.state_dict(),
-            '{}/{}/actor.pkl'.format(path, niters)
+            '{}/actor.pkl'.format(path)
         )
         torch.save(
             self.critic.state_dict(),
-            '{}/{}/critic.pkl'.format(path, niters)
+            '{}/critic.pkl'.format(path)
         )
         torch.save(
             self.actor_target.state_dict(),
-            '{}/{}/actor_target.pkl'.format(path, niters)
+            '{}/actor_target.pkl'.format(path)
         )
         torch.save(
             self.critic_target.state_dict(),
-            '{}/{}/critic_target.pkl'.format(path, niters)
+            '{}/critic_target.pkl'.format(path)
         )
         if save_memory:
             self.memory.save('{}/rpm.pkl'.format(path))
-
-
-def mirror_s(state):
-    cent = state[:OFFSET_CENT]
-    left = state[OFFSET_CENT:OFFSET_LEFT]
-    right = state[OFFSET_LEFT:OFFSET_RIGHT]
-    rest = state[OFFSET_RIGHT:]
-    return np.concatenate([cent, right, left, rest])
-
-
-def mirror_a(action):
-    return np.concatenate([action[9:], action[:9]])
 
 
 class DistributedTrain(object):
@@ -333,7 +362,7 @@ class DistributedTrain(object):
 
         noise_source = one_fsq_noise()
         for j in range(200):
-            noise_source.one((DIM_ACTION,), noise_level)
+            noise_source.one((DIM_ACTION * 2,), noise_level)
 
         state = env.reset()
 
@@ -351,15 +380,12 @@ class DistributedTrain(object):
             phased_noise_amplitude = max(0, phased_noise_amplitude * 2 - 1)
             phased_noise_amplitude = max(0.01, phased_noise_amplitude ** 2)
 
-            exploration_noise = noise_source.one((DIM_ACTION,), noise_level) * phased_noise_amplitude
+            exploration_noise = noise_source.one((DIM_ACTION * 2,), noise_level) * phased_noise_amplitude
             action += exploration_noise * 0.5
             action = np.clip(action, 0, 1)
 
             next_state, reward, done, info = env.step(action.tolist())
-            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done]))
-            if n_steps >= 25:
-                self.agent.memory.push(deepcopy_all(mirror_s(state), mirror_a(action), [reward],
-                                                    mirror_s(next_state), [done]))
+            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [float(done)]))
 
             if len(self.agent.memory) >= warmup:
                 with self.lock:
@@ -378,7 +404,7 @@ class DistributedTrain(object):
                   .format(ep_reward, n_steps, noise_level, len(self.agent.memory), t))
 
             global t0
-            self.plotter.pushys([max(-4.0, ep_reward), noise_level, (time.time() - t0) % 3600 / 3600 - 3])
+            self.plotter.pushys([ep_reward, noise_level, (time.time() - t0) % 3600 / 3600 - 2])
 
         _env.rel()
         del env
@@ -407,10 +433,10 @@ def train(args):
 
     dist_train = DistributedTrain(ddpg)
 
-    noise_decay_rate = 0.001
+    noise_decay_rate = 0.0006
     noise_floor = 0.1
     noiseless = 0.01
-    noise_level = 1.0 * ((1.0 - noise_decay_rate) ** args.resume)
+    noise_level = 1.2 * ((1.0 - noise_decay_rate) ** args.resume)
 
     for i in range(args.resume, args.max_ep):
         print('Episode {} / {}'.format(i + 1, args.max_ep))
@@ -426,7 +452,7 @@ def train(args):
         time.sleep(0.005)
 
         if args.model and (i + 1) % 100 == 0:
-            ddpg.save_model(args.model, i+1)
+            ddpg.save_model('{}/{}'.format(args.model, i + 1))
 
 
 def test(args):
@@ -436,7 +462,7 @@ def test(args):
     ddpg.load_model(args.model, load_memory=False)
     env = RunEnv(visualize=args.visualize, max_obstacles=3)
 
-    np.random.seed(55688)
+    np.random.seed(1131231)
     for i in range(1):
         step = 0
         state = env.reset(difficulty=2)
@@ -444,7 +470,7 @@ def test(args):
 
         state = fg.gen(state)
         obs = fg.traj[0]
-        print(obs.left_knee_r, obs.right_knee_r)
+        #print(obs.left_knee_x, obs.left_talus_x)
 
         ep_reward = 0
         ep_memories = []
@@ -453,8 +479,9 @@ def test(args):
             next_state, reward, done, info = env.step(action.tolist())
             next_state = fg.gen(next_state)
 
-            obs = fg.traj[0]
-            print(obs.left_knee_r, obs.right_knee_r)
+#            obs = fg.traj[0]
+#            print(obs.left_knee_r, obs.left_ankle_r, obs.left_hip_r, obs.left_toe_y)
+#            print(obs.right_knee_r, obs.right_ankle_r, obs.right_hip_r, obs.right_toe_y)
 
             print('step: {0:03d}'.format(step), end=', action: ')
             for act in action:
@@ -471,50 +498,6 @@ def test(args):
         print('\nEpisode: {} Reward: {}, n_steps: {}'.format(i, ep_reward, step))
 
 
-def submit(args):
-    print('start submitting')
-
-    remote_base = 'http://grader.crowdai.org:1729'
-    client = Client(remote_base)
-
-    ddpg = DDPG()
-    ddpg.load_model(args.model, load_memory=False)
-
-    state = client.env_create(TOKEN)
-    fg = FeatureGenerator()
-    state = fg.gen(state)
-
-    step = 0
-    ep_reward = 0
-
-    while True:
-        print('selecting action ...', end=' ')
-        action = ddpg.select_action(list(state))
-
-        print('client.env_step ...')
-        next_state, reward, done, info = client.env_step(action.tolist())
-        next_state = fg.gen(next_state)
-
-        print('step: {0:03d}, ep_reward: {1:02.08f}'.format(step, ep_reward))
-        state = next_state
-        ep_reward += reward
-        step += 1
-
-        if done:
-            print('done')
-            state = client.env_reset()
-            if not state:
-                break
-
-            step = 0
-            ep_reward = 0
-
-            fg = FeatureGenerator()
-            state = fg.gen(state)
-
-    client.submit()
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='model', type=str)
@@ -525,12 +508,9 @@ if __name__ == '__main__':
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--train', action='store_true')
     action.add_argument('--test', action='store_true')
-    action.add_argument('--submit', action='store_true')
     args = parser.parse_args()
 
     if args.test:
         test(args)
-    elif args.submit:
-        submit(args)
     else:
         train(args)
