@@ -4,6 +4,7 @@ import time
 import pickle
 import argparse
 import random
+from queue import Queue
 from threading import Lock, Thread
 from copy import deepcopy
 
@@ -32,10 +33,10 @@ MAX_EP_STEPS = 1000
 ENV_SKIP = 1
 LR_ACTOR = 1e-4     # learning rate for actor
 LR_CRITIC = 3e-4    # learning rate for critic
-GAMMA = 0.995       # reward discount
+GAMMA = 0.997       # reward discount
 TAU = 1e-3
 MEMORY_CAPACITY = 1000000
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 TOKEN = '0f3e16541bd585c72ccb1ad840807d7f'
 
 DIM_ACTION = 18
@@ -69,10 +70,12 @@ class LayerNorm(nn.Module):
 class Actor(nn.Module):
     def __init__(self):
         super(Actor, self).__init__()
-        self.extero1 = nn.Conv1d(1, 4, 5, stride=3)
+        self.extero1 = nn.Linear(DIM_EX, 128)
+
+        self.ln_e1 = LayerNorm(128)
 
         self.hidden1 = nn.Linear(DIM_BODY, 256)
-        self.hidden2 = nn.Linear(256 + 328, 256)
+        self.hidden2 = nn.Linear(256 + 128, 256)
         self.hidden3 = nn.Linear(256, 128)
         self.hidden4 = nn.Linear(128, DIM_ACTION)
 
@@ -87,9 +90,8 @@ class Actor(nn.Module):
         x1 = F.leaky_relu(self.hidden1(x1), negative_slope=0.2)
         x1 = self.ln1(x1)
 
-        x2 = x2.unsqueeze(1)
         x2 = F.leaky_relu(self.extero1(x2), negative_slope=0.2)
-        x2 = x2.view(x2.size(0), -1)
+        x2 = self.ln_e1(x2)
 
         x = torch.cat([x1, x2], 1)
         x = F.leaky_relu(self.hidden2(x), negative_slope=0.2)
@@ -104,9 +106,11 @@ class Critic(nn.Module):
 
     def __init__(self):
         super(Critic, self).__init__()
-        self.extero1 = nn.Conv1d(1, 4, 5, stride=3)
+        self.extero1 = nn.Linear(DIM_EX, 128)
 
-        self.hidden1 = nn.Linear(DIM_BODY + 328, 256)
+        self.ln_e1 = LayerNorm(128)
+
+        self.hidden1 = nn.Linear(DIM_BODY + 128, 256)
         self.hidden2 = nn.Linear(256 + DIM_ACTION, 128)
         self.hidden3 = nn.Linear(128, 128)
         self.hidden4 = nn.Linear(128, 1)
@@ -120,9 +124,8 @@ class Critic(nn.Module):
         x1 = obs[:, :OFFSET_BODY]
         x2 = obs[:, OFFSET_BODY:]
 
-        x2 = x2.unsqueeze(1)
         x2 = F.leaky_relu(self.extero1(x2), negative_slope=0.2)
-        x2 = x2.view(x2.size(0), -1)
+        x2 = self.ln_e1(x2)
 
         x = torch.cat([x1, x2], 1)
         x = F.leaky_relu(self.hidden1(x), negative_slope=0.2)
@@ -312,6 +315,7 @@ class DistributedTrain(object):
 
     def __init__(self, agent):
         self.agent = agent
+        self.queue = Queue()
         self.lock = Lock()
 
         from farmer import farmer as farmer_class
@@ -321,8 +325,7 @@ class DistributedTrain(object):
     def playonce(self, noise_level, _env):
         t = time.time()
 
-        skip = ENV_SKIP
-        env = fastenv(_env, skip)
+        env = fastenv(_env, ENV_SKIP)
 
         noise_source = one_fsq_noise(skip=4)
         for j in range(200):
@@ -332,7 +335,7 @@ class DistributedTrain(object):
 
         n_steps = 0
         ep_reward = 0
-        warmup = BATCH_SIZE * 128
+        warmup = BATCH_SIZE * (64 / ENV_SKIP)
 
 
         noise_phase = int(np.random.uniform() * 999999)
@@ -357,8 +360,7 @@ class DistributedTrain(object):
                                                     mirror_s(next_state), [done1]))
 
             if len(self.agent.memory) >= warmup:
-                with self.lock:
-                    self.agent.learn()
+                self.queue.put(1)
 
             state = next_state
             ep_reward += reward
@@ -385,6 +387,11 @@ class DistributedTrain(object):
             else:
                 time.sleep(0.005)
 
+    def learn(self):
+        while True:
+            signal = self.queue.get()
+            self.agent.learn()
+
 
 def train(args):
     print('start training')
@@ -398,11 +405,13 @@ def train(args):
         ddpg.load_model('{}/{}'.format(args.model, args.resume))
 
     dist_train = DistributedTrain(ddpg)
+    t = Thread(target=dist_train.learn, daemon=True)
+    t.start()
 
     noise_decay_rate = 0.001
     noise_floor = 0.001
     noiseless = 0.001
-    noise_level = 1.2 * ((1.0 - noise_decay_rate) ** args.resume)
+    noise_level = 1.3 * ((1.0 - noise_decay_rate) ** args.resume)
 
     for i in range(args.resume, args.max_ep):
         print('Episode {} / {}'.format(i + 1, args.max_ep))
