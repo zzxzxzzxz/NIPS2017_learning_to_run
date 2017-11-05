@@ -19,7 +19,7 @@ def bind_alternative_pelvis_judgement(runenv):
 
 # use custom episode length.
 def use_alternative_episode_length(runenv):
-    runenv.spec.timestep_limit = 560
+    runenv.spec.timestep_limit = 1000
 
 # separate process that holds a separate RunEnv instance.
 # This has to be done since RunEnv() in the same process result in interleaved running of simulations.
@@ -31,12 +31,12 @@ def standalone_headless_isolated(pq, cq, plock):
         import traceback
         #from osim.env import RunEnv
         from myenv import MyRunEnv as RunEnv
-        if np.random.uniform() <= 0.05:
+        if np.random.uniform() <= 0.03:
             max_obstacles = 0
         else:
-            max_obstacles = 5
+            max_obstacles = 10
         e = RunEnv(visualize=False, max_obstacles=max_obstacles)
-        use_alternative_episode_length(e)
+        #use_alternative_episode_length(e)
     except Exception as e:
         print('error on start of standalone')
         traceback.print_exc()
