@@ -30,10 +30,10 @@ torch.manual_seed(314)
 USE_CUDA = False
 FLOAT = torch.cuda.FloatTensor if USE_CUDA else torch.FloatTensor
 MAX_EP_STEPS = 1000
-ENV_SKIP = 1
+ENV_SKIP = 4
 LR_ACTOR = 1e-4     # learning rate for actor
 LR_CRITIC = 3e-4    # learning rate for critic
-GAMMA = 0.997       # reward discount
+GAMMA = 0.98        # reward discount
 TAU = 1e-3
 MEMORY_CAPACITY = 1000000
 BATCH_SIZE = 128
@@ -70,12 +70,11 @@ class LayerNorm(nn.Module):
 class Actor(nn.Module):
     def __init__(self):
         super(Actor, self).__init__()
-        self.extero1 = nn.Linear(DIM_EX, 128)
-
-        self.ln_e1 = LayerNorm(128)
+        self.extero1 = nn.Conv1d(1, 16, 4, stride=2)
+        self.extero2 = nn.Conv1d(16, 8, 4, stride=2)
 
         self.hidden1 = nn.Linear(DIM_BODY, 256)
-        self.hidden2 = nn.Linear(256 + 128, 256)
+        self.hidden2 = nn.Linear(256 + 488, 256)
         self.hidden3 = nn.Linear(256, 128)
         self.hidden4 = nn.Linear(128, DIM_ACTION)
 
@@ -90,8 +89,10 @@ class Actor(nn.Module):
         x1 = F.leaky_relu(self.hidden1(x1), negative_slope=0.2)
         x1 = self.ln1(x1)
 
+        x2 = x2.unsqueeze(1)
         x2 = F.leaky_relu(self.extero1(x2), negative_slope=0.2)
-        x2 = self.ln_e1(x2)
+        x2 = F.leaky_relu(self.extero2(x2), negative_slope=0.2)
+        x2 = x2.view(x2.size(0), -1)
 
         x = torch.cat([x1, x2], 1)
         x = F.leaky_relu(self.hidden2(x), negative_slope=0.2)
@@ -106,11 +107,10 @@ class Critic(nn.Module):
 
     def __init__(self):
         super(Critic, self).__init__()
-        self.extero1 = nn.Linear(DIM_EX, 128)
+        self.extero1 = nn.Conv1d(1, 16, 4, stride=2)
+        self.extero2 = nn.Conv1d(16, 8, 4, stride=2)
 
-        self.ln_e1 = LayerNorm(128)
-
-        self.hidden1 = nn.Linear(DIM_BODY + 128, 256)
+        self.hidden1 = nn.Linear(DIM_BODY + 488, 256)
         self.hidden2 = nn.Linear(256 + DIM_ACTION, 128)
         self.hidden3 = nn.Linear(128, 128)
         self.hidden4 = nn.Linear(128, 1)
@@ -124,8 +124,10 @@ class Critic(nn.Module):
         x1 = obs[:, :OFFSET_BODY]
         x2 = obs[:, OFFSET_BODY:]
 
+        x2 = x2.unsqueeze(1)
         x2 = F.leaky_relu(self.extero1(x2), negative_slope=0.2)
-        x2 = self.ln_e1(x2)
+        x2 = F.leaky_relu(self.extero2(x2), negative_slope=0.2)
+        x2 = x2.view(x2.size(0), -1)
 
         x = torch.cat([x1, x2], 1)
         x = F.leaky_relu(self.hidden1(x), negative_slope=0.2)
@@ -327,7 +329,7 @@ class DistributedTrain(object):
 
         env = fastenv(_env, ENV_SKIP)
 
-        noise_source = one_fsq_noise(skip=4)
+        noise_source = one_fsq_noise()
         for j in range(200):
             noise_source.one((DIM_ACTION,), noise_level)
 
@@ -335,8 +337,7 @@ class DistributedTrain(object):
 
         n_steps = 0
         ep_reward = 0
-        warmup = BATCH_SIZE * (64 / ENV_SKIP)
-
+        warmup = BATCH_SIZE * (128 / ENV_SKIP)
 
         noise_phase = int(np.random.uniform() * 999999)
 
@@ -355,7 +356,7 @@ class DistributedTrain(object):
             next_state, reward, done, info = env.step(action.tolist())
             done1 = 0.0 if info['step'] == MAX_EP_STEPS else float(done)
             self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done1]))
-            if n_steps >= 25:
+            if n_steps >= 100 / ENV_SKIP:
                 self.agent.memory.push(deepcopy_all(mirror_s(state), mirror_a(action), [reward],
                                                     mirror_s(next_state), [done1]))
 

@@ -1,21 +1,28 @@
 import numpy as np
 
 class one_fsq_noise(object):
-    def __init__(self, skip=1):
+    def __init__(self):
         self.buffer = np.array([0.])
         self.state = np.random.RandomState()
-        self.skip = skip
-        self.count = 0
+        self.skip = 1
+        self.skipcounter = 0
 
     def one(self,size,noise_level=1.):
-        if self.buffer.shape != size:
-            self.buffer = np.zeros(size, dtype='float32')
+        # draw one gaussian
+        g = self.state.normal(loc=0.,scale=noise_level,size=size)
 
-        if self.count == 0:
-            g = self.state.normal(loc=0., scale=noise_level, size=size)
+        if self.buffer.shape != size:
+            self.buffer = np.zeros(size,dtype='float32')
+
+        # skip for frequency adjustment to suit different envs.
+        self.skipcounter+=1
+        if self.skipcounter >= self.skip-1:
+            self.skipcounter=0
+
             self.buffer += g
+
+            # high pass a little
             self.buffer *= .9
-        self.count = (self.count + 1) % self.skip
 
         return self.buffer.copy()
 
