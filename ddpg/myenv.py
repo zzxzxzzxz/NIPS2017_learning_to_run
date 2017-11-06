@@ -15,8 +15,7 @@ class MyRunEnv(RunEnv):
         pelvis_dx = curr.pelvis_x - prev.pelvis_x
         nz = (curr.head_y - curr.pelvis_y) / dist(curr.head_x, curr.head_y, curr.pelvis_x, curr.pelvis_y)
 
-        if pelvis_dx > 0:
-            reward -= (1.0 - nz) * pelvis_dx
+        reward += 0.001 * nz
 
         if self.istep >= 70:
             if curr.left_knee_r > 0.015:
