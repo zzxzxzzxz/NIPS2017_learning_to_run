@@ -6,20 +6,8 @@
 import numpy as np
 import multiprocessing,time,random,threading
 from multiprocessing import Process, Pipe, Queue
-# from osim.env import RunEnv
 
 ncpu = multiprocessing.cpu_count()
-
-# bind our custom version of pelvis too low judgement function to original env
-def bind_alternative_pelvis_judgement(runenv):
-    def is_pelvis_too_low(self):
-        return (self.current_state[self.STATE_PELVIS_Y] < (0.5 if True else 0.65))
-    import types
-    runenv.is_pelvis_too_low = types.MethodType(is_pelvis_too_low,runenv)
-
-# use custom episode length.
-def use_alternative_episode_length(runenv):
-    runenv.spec.timestep_limit = 1000
 
 # separate process that holds a separate RunEnv instance.
 # This has to be done since RunEnv() in the same process result in interleaved running of simulations.
@@ -36,7 +24,6 @@ def standalone_headless_isolated(pq, cq, plock):
         else:
             max_obstacles = 10
         e = RunEnv(visualize=False, max_obstacles=max_obstacles)
-        #use_alternative_episode_length(e)
     except Exception as e:
         print('error on start of standalone')
         traceback.print_exc()
@@ -50,8 +37,6 @@ def standalone_headless_isolated(pq, cq, plock):
         # a way to report errors ( since you can't just throw them over a pipe )
         # e should be a string
         print('(standalone) got error!!!')
-        # conn.send(('error',e))
-        # conn.put(('error',e))
         cq.put(('error',e))
 
     def floatify(np):
@@ -59,29 +44,18 @@ def standalone_headless_isolated(pq, cq, plock):
 
     try:
         while True:
-            # msg = conn.recv()
-            # msg = conn.get()
             msg = pq.get()
             # messages should be tuples,
             # msg[0] should be string
 
-            # isinstance is dangerous, commented out
-            # if not isinstance(msg,tuple):
-            #     raise Exception('pipe message received by headless is not a tuple')
-
             if msg[0] == 'reset':
                 o = e.reset(difficulty=2)
-                # conn.send(floatify(o))
                 cq.put(floatify(o))
-                # conn.put(floatify(o))
             elif msg[0] == 'step':
                 o,r,d,i = e.step(msg[1])
                 o = floatify(o) # floatify the observation
                 cq.put((o,r,d,i))
-                # conn.put(ordi)
-                # conn.send(ordi)
             else:
-                # conn.close()
                 cq.close()
                 pq.close()
                 del e
@@ -284,15 +258,6 @@ class eipool: # Environment Instance Pool
                 e.release() # freed
         self.lock.release()
 
-    # def num_free(self):
-    #     return sum([0 if e.is_occupied() else 1 for e in self.pool])
-    #
-    # def num_total(self):
-    #     return len(self.pool)
-    #
-    # def all_free(self):
-    #     return self.num_free()==self.num_total()
-
     def get_env_by_id(self,id):
         for e in self.pool:
             if e.id == id:
@@ -368,18 +333,6 @@ class farm:
             self._new(n)
         self.lock.release()
 
-    # # recreate the pool
-    # def renew(self,n=None):
-    #     global ncpu
-    #     self.pretty('natural pool renew')
-    #
-    #     if hasattr(self,'eip'): # if eip exists
-    #         while not self.eip.all_free(): # wait until all free
-    #             self.pretty('wait until all of self.eip free..')
-    #             time.sleep(1)
-    #         del self.eip
-    #     self._new(n)
-
     def forcerenew(self,n=None):
         self.lock.acquire()
         self.pretty('forced pool renew')
@@ -392,10 +345,12 @@ class farm:
     def _new(self,n=None):
         self.eip = eipool(ncpu if n is None else n)
 
+
 # expose the farm via Pyro4
 def main():
     from pyro_helper import pyro_expose
-    pyro_expose(farm,20099,'farm')
+    pyro_expose(farm, 20099,' farm')
+
 
 if __name__ == '__main__':
     main()

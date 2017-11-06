@@ -1,5 +1,8 @@
 import sys
 import os
+os.environ['OMP_NUM_THREADS'] = '2'
+os.environ['MKL_NUM_THREADS'] = '2'
+
 import time
 import pickle
 import argparse
@@ -18,11 +21,8 @@ from torch.autograd import Variable
 from osim.http.client import Client
 
 from noise import one_fsq_noise
-#from multi import fastenv
-#from observation_processor import generate_observation as go
 from feature_generator import FeatureGenerator
 from wrap_env import fastenv
-#from plotter import interprocess_plotter as Plotter
 
 np.random.seed(314)
 torch.manual_seed(314)
@@ -319,7 +319,6 @@ class DistributedTrain(object):
     def __init__(self, agent):
         self.agent = agent
         self.lock = Lock()
-        #self.plotter = Plotter(num_lines=3)
 
         from farmer import farmer as farmer_class
         self.farmer = farmer_class()
@@ -377,9 +376,6 @@ class DistributedTrain(object):
             print('reward: {}, n_steps: {}, explore: {:.5f}, n_mem: {}, time: {:.2f}' \
                   .format(ep_reward, n_steps, noise_level, len(self.agent.memory), t))
 
-            #global t0
-            #self.plotter.pushys([max(-4.0, ep_reward), noise_level, (time.time() - t0) % 3600 / 3600 - 3])
-
         _env.rel()
         del env
 
@@ -409,7 +405,8 @@ def train(args):
 
     noise_decay_rate = 0.001
     noise_floor = 0.1
-    noiseless = 0.01
+    noiseless = 0.005
+    noiseless2 = 0.0001
     noise_level = 1.0 * ((1.0 - noise_decay_rate) ** args.resume)
 
     for i in range(args.resume, args.max_ep):
@@ -418,7 +415,8 @@ def train(args):
         noise_level *= (1.0 - noise_decay_rate)
         noise_level = max(noise_floor, noise_level)
 
-        nl = noise_level if (i + 1) % 20 else noiseless
+        nl = noise_level if (i + 1) % 10 else noiseless
+        nl = nl if (i + 1) % 30 else noiseless2
         dist_train.play_if_available(nl)
 
         print('elapsed time: {0:.2f} secs'.format(time.time() - t0))
@@ -434,17 +432,17 @@ def test(args):
 
     ddpg = DDPG()
     ddpg.load_model(args.model, load_memory=False)
-    env = RunEnv(visualize=args.visualize, max_obstacles=3)
+    env = RunEnv(visualize=args.visualize, max_obstacles=10)
 
-    np.random.seed(55688)
+    np.random.seed(5566)
     for i in range(1):
         step = 0
         state = env.reset(difficulty=2)
         fg = FeatureGenerator()
 
         state = fg.gen(state)
-        obs = fg.traj[0]
-        print(obs.left_knee_r, obs.right_knee_r)
+        #obs = fg.traj[0]
+        #print(obs.left_knee_r, obs.right_knee_r)
 
         ep_reward = 0
         ep_memories = []
@@ -453,8 +451,8 @@ def test(args):
             next_state, reward, done, info = env.step(action.tolist())
             next_state = fg.gen(next_state)
 
-            obs = fg.traj[0]
-            print(obs.left_knee_r, obs.right_knee_r)
+            #obs = fg.traj[0]
+            #print(obs.left_knee_r, obs.right_knee_r)
 
             print('step: {0:03d}'.format(step), end=', action: ')
             for act in action:
@@ -465,6 +463,8 @@ def test(args):
             ep_reward += reward
             step += 1
 
+            print('reward:', ep_reward)
+
             if done:
                 break
 
@@ -474,7 +474,7 @@ def test(args):
 def submit(args):
     print('start submitting')
 
-    remote_base = 'http://grader.crowdai.org:1729'
+    remote_base = 'http://grader.crowdai.org:1733'
     client = Client(remote_base)
 
     ddpg = DDPG()
