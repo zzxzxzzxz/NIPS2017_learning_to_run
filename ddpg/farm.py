@@ -349,7 +349,7 @@ class farm:
 # expose the farm via Pyro4
 def main():
     from pyro_helper import pyro_expose
-    pyro_expose(farm, 20099,' farm')
+    pyro_expose(farm, 20099, 'farm')
 
 
 if __name__ == '__main__':
