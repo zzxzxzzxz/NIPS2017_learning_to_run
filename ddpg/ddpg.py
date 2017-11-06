@@ -1,8 +1,5 @@
 import sys
 import os
-os.environ['OMP_NUM_THREADS'] = '2'
-os.environ['MKL_NUM_THREADS'] = '2'
-
 import time
 import pickle
 import argparse
@@ -423,7 +420,7 @@ def train(args):
         sys.stdout.flush()
         time.sleep(0.005)
 
-        if args.model and (i + 1) % 100 == 0:
+        if args.model and (i + 1) % 200 == 0:
             ddpg.save_model(args.model, i+1)
 
 

@@ -1,5 +1,6 @@
 .*.un~
 .*.swp
 .*.pyc
+*.log
 tmp
 stanford-osrl
