@@ -4,7 +4,6 @@ import time
 import pickle
 import argparse
 import random
-from queue import Queue
 from threading import Lock, Thread
 from copy import deepcopy
 
@@ -19,8 +18,11 @@ from torch.autograd import Variable
 from osim.http.client import Client
 
 from noise import one_fsq_noise
+#from multi import fastenv
+#from observation_processor import generate_observation as go
 from feature_generator import FeatureGenerator
 from wrap_env import fastenv
+#from plotter import interprocess_plotter as Plotter
 
 np.random.seed(314)
 torch.manual_seed(314)
@@ -317,7 +319,7 @@ class DistributedTrain(object):
     def __init__(self, agent):
         self.agent = agent
         self.lock = Lock()
-        self.queue = Queue()
+        #self.plotter = Plotter(num_lines=3)
 
         from farmer import farmer as farmer_class
         self.farmer = farmer_class()
@@ -354,14 +356,14 @@ class DistributedTrain(object):
             action = np.clip(action, 0, 1)
 
             next_state, reward, done, info = env.step(action.tolist())
-            done1 = 0.0 if info['step'] == MAX_EP_STEPS else float(done)
-            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done1]))
+            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done]))
             if n_steps >= 25:
                 self.agent.memory.push(deepcopy_all(mirror_s(state), mirror_a(action), [reward],
-                                                    mirror_s(next_state), [done1]))
+                                                    mirror_s(next_state), [done]))
 
             if len(self.agent.memory) >= warmup:
-                self.queue.put(1)
+                with self.lock:
+                    self.agent.learn()
 
             state = next_state
             ep_reward += reward
@@ -375,6 +377,9 @@ class DistributedTrain(object):
             print('reward: {}, n_steps: {}, explore: {:.5f}, n_mem: {}, time: {:.2f}' \
                   .format(ep_reward, n_steps, noise_level, len(self.agent.memory), t))
 
+            #global t0
+            #self.plotter.pushys([max(-4.0, ep_reward), noise_level, (time.time() - t0) % 3600 / 3600 - 3])
+
         _env.rel()
         del env
 
@@ -386,12 +391,7 @@ class DistributedTrain(object):
                 t.start()
                 break
             else:
-                time.sleep(0.05)
-
-    def learn(self):
-        while True:
-            signal = self.queue.get()
-            self.agent.learn()
+                time.sleep(0.005)
 
 
 def train(args):
@@ -406,13 +406,11 @@ def train(args):
         ddpg.load_model('{}/{}'.format(args.model, args.resume))
 
     dist_train = DistributedTrain(ddpg)
-    t = Thread(target=dist_train.learn, daemon=True)
-    t.start()
 
-    noise_decay_rate = 0.0008
-    noise_floor = 0.001
-    noiseless = 0.001
-    noise_level = 1.2 * ((1.0 - noise_decay_rate) ** args.resume)
+    noise_decay_rate = 0.001
+    noise_floor = 0.1
+    noiseless = 0.01
+    noise_level = 1.0 * ((1.0 - noise_decay_rate) ** args.resume)
 
     for i in range(args.resume, args.max_ep):
         print('Episode {} / {}'.format(i + 1, args.max_ep))
@@ -420,7 +418,7 @@ def train(args):
         noise_level *= (1.0 - noise_decay_rate)
         noise_level = max(noise_floor, noise_level)
 
-        nl = noise_level if (i + 1) % 40 else noiseless
+        nl = noise_level if (i + 1) % 20 else noiseless
         dist_train.play_if_available(nl)
 
         print('elapsed time: {0:.2f} secs'.format(time.time() - t0))
