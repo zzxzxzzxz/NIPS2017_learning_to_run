@@ -11,8 +11,9 @@ class MyRunEnv(RunEnv):
         observation, reward, done, info = super(MyRunEnv, self).step(action)
         obs = Observation(observation)
 
-        nz = (obs.head_y - obs.pelvis_y) / dist(obs.head_x, obs.head_y, obs.pelvis_x, obs.pelvis_y)
-        reward += 0.0005 * nz
+        if obs.pelvis_x >= 0.5:
+            nz = (obs.head_y - obs.pelvis_y) / dist(obs.head_x, obs.head_y, obs.pelvis_x, obs.pelvis_y)
+            reward += 0.0005 * nz
 
         if self.istep >= 70:
             if obs.left_knee_r > 0.015:
