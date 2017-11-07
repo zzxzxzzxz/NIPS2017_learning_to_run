@@ -337,25 +337,28 @@ class DistributedTrain(object):
         ep_reward = 0
         warmup = BATCH_SIZE * 32
 
-        noise_phase = int(np.random.uniform() * 999999)
+#        noise_phase = int(np.random.uniform() * 999999)
 
         while True:
             action = self.agent.select_action(state)
 
-            phased_noise_anneal_duration = 100
-            phased_noise_amplitude = ((-noise_phase-n_steps) % phased_noise_anneal_duration) / phased_noise_anneal_duration
-            phased_noise_amplitude = max(0, phased_noise_amplitude * 2 - 1)
-            phased_noise_amplitude = max(0.01, phased_noise_amplitude ** 2)
+#            phased_noise_anneal_duration = 100
+#            phased_noise_amplitude = ((-noise_phase-n_steps) % phased_noise_anneal_duration) / phased_noise_anneal_duration
+#            phased_noise_amplitude = max(0, phased_noise_amplitude * 2 - 1)
+#            phased_noise_amplitude = max(0.01, phased_noise_amplitude ** 2)
 
-            exploration_noise = noise_source.one((DIM_ACTION,), noise_level) * phased_noise_amplitude
+            exploration_noise = noise_source.one((DIM_ACTION,), noise_level) #* phased_noise_amplitude
             action += exploration_noise * 0.5
             action = np.clip(action, 0, 1)
 
             next_state, reward, done, info = env.step(action.tolist())
-            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done]))
+            done1 = False if info['step'] == MAX_EP_STEPS else done
+            self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done1]))
             if n_steps >= 25:
                 self.agent.memory.push(deepcopy_all(mirror_s(state), mirror_a(action), [reward],
-                                                    mirror_s(next_state), [done]))
+                                                    mirror_s(next_state), [done1]))
+            else:
+                self.agent.memory.push(deepcopy_all(state, action, [reward], next_state, [done1]))
 
             if len(self.agent.memory) >= warmup:
                 with self.lock:
@@ -401,10 +404,10 @@ def train(args):
     dist_train = DistributedTrain(ddpg)
 
     noise_decay_rate = 0.001
-    noise_floor = 0.1
-    noiseless = 0.005
+    noise_floor = 0.05
+    noiseless = 0.01
     noiseless2 = 0.0001
-    noise_level = 1.0 * ((1.0 - noise_decay_rate) ** args.resume)
+    noise_level = 1.0 * ((1.0 - noise_decay_rate) ** (args.resume - 4800))
 
     for i in range(args.resume, args.max_ep):
         print('Episode {} / {}'.format(i + 1, args.max_ep))
@@ -412,7 +415,7 @@ def train(args):
         noise_level *= (1.0 - noise_decay_rate)
         noise_level = max(noise_floor, noise_level)
 
-        nl = noise_level if (i + 1) % 10 else noiseless
+        nl = noise_level if (i + 1) % 20 else noiseless
         nl = nl if (i + 1) % 30 else noiseless2
         dist_train.play_if_available(nl)
 

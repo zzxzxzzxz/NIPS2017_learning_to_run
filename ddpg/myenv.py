@@ -12,7 +12,7 @@ class MyRunEnv(RunEnv):
         obs = Observation(observation)
 
         nz = (obs.head_y - obs.pelvis_y) / dist(obs.head_x, obs.head_y, obs.pelvis_x, obs.pelvis_y)
-        reward += 0.001 * nz
+        reward += 0.0005 * nz
 
         if self.istep >= 70:
             if obs.left_knee_r > 0.015:
