@@ -433,7 +433,7 @@ def test(args):
     ddpg.load_model(args.model, load_memory=False)
     env = RunEnv(visualize=args.visualize, max_obstacles=10)
 
-    np.random.seed(5566)
+    np.random.seed(args.seed)
     for i in range(1):
         step = 0
         state = env.reset(difficulty=2)
@@ -520,6 +520,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_ep', default=10000, type=int)
     parser.add_argument('--visualize', action='store_true')
     parser.add_argument('--resume', default=0, type=int)
+    parser.add_argument('--seed', default=5566, type=int)
 
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--train', action='store_true')
